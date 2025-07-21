@@ -3,6 +3,7 @@ import typer
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+import re
 
 cli_app = typer.Typer()
 
@@ -40,6 +41,14 @@ def get_git_diff() -> str:
     except UnicodeDecodeError:
         return result.stdout.decode("utf-8", errors="replace").strip()
 
+def extract_first_valid_commit_line(message: str) -> str:
+    """Return the first line that matches the Conventional Commits format."""
+    pattern = re.compile(r"^(feat|fix|chore|docs|refactor|style|test)(\([\w\-]+\))?: .+")
+    for line in message.strip().splitlines():
+        if pattern.match(line.strip()):
+            return line.strip()
+    return "chore: update"  # fallback
+
 def extract_first_line(message: str) -> str:
     """Return the first non-empty line from a message."""
     for line in message.strip().splitlines():
@@ -68,7 +77,7 @@ Diff:
 
     typer.secho("🧠 Prompt sent to Groq", fg=typer.colors.BLUE)
     message_raw = query_groq(prompt)
-    message_clean = extract_first_line(message_raw)
+    message_clean = extract_first_valid_commit_line(message_raw)
 
     if verbose:
         typer.echo("\n🧾 Full LLM response:\n")
