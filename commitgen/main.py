@@ -6,4 +6,3 @@ app.add_typer(cli_app)
 
 if __name__ == "__main__":
     app()
-    print("Debugging: Main app initialized with CLI app.")

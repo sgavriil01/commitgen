@@ -1,106 +1,117 @@
 import subprocess
-import os
-import re
 import typer
-from typing import List
+import os
 from dotenv import load_dotenv
 from openai import OpenAI
+import re
+import tempfile
+import sys
 
 cli_app = typer.Typer()
-
-# Load GROQ_API_KEY
 load_dotenv()
+
 api_key = os.getenv("GROQ_API_KEY")
-if not api_key:
-    raise RuntimeError("Missing GROQ_API_KEY in .env")
+client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
 
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.groq.com/openai/v1",
-)
+def query_commit_message(diff: str, model="llama3-8b-8192") -> tuple[str, str]:
+    prompt = f"""
+You are an experienced developer writing Git commit messages using the Conventional Commits format.
 
-# Prompt instructions with few-shot examples
-FEW_SHOT_PROMPT = """
-You are an expert software engineer writing Git commit messages in Conventional Commits format.
-Use this format: <type>(<scope>): <description>
-Do not include explanations. Only return a single commit message line.
-Allowed types: feat, fix, chore, docs, refactor, style, test
-
-Examples:
-Diff:
-diff --git a/utils/math.py b/utils/math.py
-+def square(x):
-+    return x * x
-
-Commit:
-feat(utils): add square function
+- Use the format: <type>(<scope>): <short summary>
+- Follow up with a longer description if needed (separated by a newline).
+- Do not include explanations or markdown.
+- Types: feat, fix, chore, docs, refactor, style, test
 
 Diff:
-diff --git a/api/main.py b/api/main.py
--import logging
-+import logging
-+logging.basicConfig(level=logging.DEBUG)
-
-Commit:
-chore(api): add debug logging setup
+{diff}
 """
 
-def run_git_command(args: List[str]) -> str:
-    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return result.stdout.decode("utf-8", errors="replace").strip()
-
-def get_staged_files() -> List[str]:
-    output = run_git_command(["git", "diff", "--cached", "--name-only"])
-    return output.splitlines()
-
-def get_file_diff(filepath: str) -> str:
-    return run_git_command(["git", "diff", "--cached", "--unified=0", "--", filepath])
-
-def query_groq(diff: str) -> str:
-    full_prompt = f"{FEW_SHOT_PROMPT}\n\nDiff:\n{diff}\n\nCommit:"
     response = client.chat.completions.create(
-        model="llama3-8b-8192",
+        model=model,
         messages=[
-            {"role": "system", "content": "You're a clean Git commit message writer."},
-            {"role": "user", "content": full_prompt}
+            {"role": "system", "content": "Write clear, concise Git commit messages based on diffs."},
+            {"role": "user", "content": prompt}
         ],
         temperature=0.4,
-        max_tokens=100
+        max_tokens=300,
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content.strip()
+    parts = content.split("\n", 1)
+    title = parts[0].strip()
+    body = parts[1].strip() if len(parts) > 1 else ""
+    return title, body
+
+def get_staged_diff_by_file() -> dict[str, str]:
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--unified=0"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if result.stdout is None:
+        return {}
+
+    try:
+        output = result.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        output = result.stdout.decode("utf-8", errors="replace")
+
+    current_file = None
+    files = {}
+    lines = []
+
+    for line in output.splitlines():
+        if line.startswith("diff --git"):
+            if current_file and lines:
+                files[current_file] = "\n".join(lines)
+            lines = [line]
+            parts = line.split(" ")
+            current_file = parts[2].replace("a/", "", 1)
+        elif current_file:
+            lines.append(line)
+
+    if current_file and lines:
+        files[current_file] = "\n".join(lines)
+
+    return files
+
+def confirm_commit(title: str, body: str) -> bool:
+    typer.echo(f"\n📝 Commit Title:\n{title}")
+    if body:
+        typer.echo(f"\n📄 Commit Body:\n{body}")
+
+    choice = typer.prompt("\nProceed with this commit? (y = yes, n = no)", default="y")
+    return choice.lower() == "y"
+
+def make_commit(title: str, body: str) -> None:
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False, encoding="utf-8") as f:
+        f.write(title + "\n\n" + body if body else title)
+        f.flush()
+        subprocess.run(["git", "commit", "-F", f.name])
 
 @cli_app.command()
-def generate(mode: str = typer.Option("squash", help="Mode: 'squash' or 'split'")):
-    """Generate Git commit messages using Groq based on staged changes."""
-    files = get_staged_files()
+def generate():
+    files = get_staged_diff_by_file()
     if not files:
-        typer.secho("⚠️ No staged changes found. Use `git add` first.", fg=typer.colors.YELLOW)
+        typer.secho("⚠️ No staged changes found.", fg=typer.colors.RED)
         raise typer.Exit()
 
-    if mode == "split":
-        for file in files:
-            diff = get_file_diff(file)
-            typer.secho(f"\n📄 {file}", fg=typer.colors.CYAN)
-            commit_msg = query_groq(diff)
-            typer.echo(f"✅ Suggested: {commit_msg}")
-            choice = typer.prompt("Commit this? (y = yes, s = skip)", default="y").lower()
-            if choice == "y":
-                subprocess.run(["git", "commit", "-m", commit_msg, "--", file])
-                typer.secho("✅ Committed.\n", fg=typer.colors.GREEN)
-            else:
-                typer.secho("⏩ Skipped.\n", fg=typer.colors.YELLOW)
+    squash = typer.confirm(f"{len(files)} file(s) changed. Do you want to squash into a single commit?", default=True)
 
-    else:  # squash mode
-        full_diff = run_git_command(["git", "diff", "--cached", "--unified=0"])
-        commit_msg = query_groq(full_diff)
-        typer.echo(f"\n✅ Suggested Commit Message:\n{commit_msg}")
-        confirm = typer.prompt("Do you want to commit with this message? (y/n)", default="y").lower()
-        if confirm == "y":
-            subprocess.run(["git", "commit", "-m", commit_msg])
+    if squash:
+        combined_diff = "\n\n".join(files.values())
+        title, body = query_commit_message(combined_diff)
+        if confirm_commit(title, body):
+            make_commit(title, body)
             typer.secho("✅ Commit created.", fg=typer.colors.GREEN)
-        else:
-            typer.secho("❌ Commit cancelled.", fg=typer.colors.RED)
+    else:
+        for file, diff in files.items():
+            typer.echo(f"\n🔍 Processing: {file}")
+            title, body = query_commit_message(diff)
+            if confirm_commit(title, body):
+                subprocess.run(["git", "add", file])
+                make_commit(title, body)
+                typer.secho(f"✅ Committed {file}", fg=typer.colors.GREEN)
 
 if __name__ == "__main__":
     cli_app()
-    print("Dbugging: CLI app initialized with Groq API key.")
