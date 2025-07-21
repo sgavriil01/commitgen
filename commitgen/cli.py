@@ -90,6 +90,10 @@ def make_commit(title: str, body: str) -> None:
         f.write(title + "\n\n" + body if body else title)
         f.flush()
         subprocess.run(["git", "commit", "-F", f.name])
+
+def add(x: int, y: int) -> int:
+    print("Debugging connection")
+    return x + y
         
 @cli_app.command()
 def generate():
