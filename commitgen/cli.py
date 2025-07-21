@@ -45,24 +45,20 @@ def extract_first_valid_commit_line(message: str) -> str:
     """Return the first valid Conventional Commit line, stripped of markdown."""
     pattern = re.compile(r"^(feat|fix|chore|docs|refactor|style|test)(\([\w\-]+\))?: .+")
     for line in message.strip().splitlines():
-        # Strip markdown (** **) and whitespace
-        clean = re.sub(r"^\*\*(.*?)\*\*$", r"\1", line.strip())
+        clean = re.sub(r"^\*\*(.*?)\*\*$", r"\1", line.strip())  # remove **bold**
         if pattern.match(clean):
             return clean
     return "chore: update"  # fallback
 
 @cli_app.command()
-def generate(
-    commit: bool = typer.Option(True, help="Immediately commit with the generated message."),
-    verbose: bool = typer.Option(False, help="Print the full LLM response.")
-):
-    """Generate and optionally commit a message from staged code."""
+def generate():
+    """Interactively generate and confirm a commit message from staged code."""
     diff = get_git_diff()
     if not diff:
         typer.echo("⚠️ No staged changes found. Use `git add` first.")
         raise typer.Exit()
 
-    prompt = f"""Write a short, clear Git commit message for the following staged diff.
+    prompt_template = """Write a Git commit message for the following staged diff.
 Use the Conventional Commits format: <type>(<scope>): <description>
 Allowed types: feat, fix, chore, docs, refactor, style, test
 
@@ -70,23 +66,45 @@ Diff:
 {diff}
 """
 
-    typer.secho("🧠 Prompt sent to Groq", fg=typer.colors.BLUE)
-    message_raw = query_groq(prompt)
-    message_clean = extract_first_valid_commit_line(message_raw)
+    attempt = 0
+    max_attempts = 3
+    message_clean = None
 
-    if verbose:
-        typer.echo("\n🧾 Full LLM response:\n")
-        typer.echo(message_raw)
+    while attempt < max_attempts:
+        prompt = prompt_template.format(diff=diff)
+        typer.secho("🧠 Prompt sent to Groq...", fg=typer.colors.CYAN)
+        message_raw = query_groq(prompt)
+        message_clean = extract_first_valid_commit_line(message_raw)
 
-    typer.secho("\n✅ Final Commit Message:\n", fg=typer.colors.GREEN)
-    typer.echo(message_clean)
+        typer.secho("\n✅ Suggested Commit Message:\n", fg=typer.colors.GREEN)
+        typer.echo(message_clean)
 
-    if commit:
-        result = subprocess.run(["git", "commit", "-m", message_clean])
-        if result.returncode == 0:
-            typer.secho("✅ Commit created successfully.", fg=typer.colors.GREEN)
+        choice = typer.prompt(
+            "\n🤖 Do you want to commit with this message? (y = yes, r = regenerate, n = cancel)",
+            default="y"
+        ).lower()
+
+        if choice == "y":
+            try:
+                result = subprocess.run(["git", "commit", "-m", message_clean])
+                if result.returncode == 0:
+                    typer.secho("✅ Commit created successfully.", fg=typer.colors.GREEN)
+                else:
+                    typer.secho("❌ Commit failed.", fg=typer.colors.RED)
+            except Exception as e:
+                typer.secho(f"❌ Error: {e}", fg=typer.colors.RED)
+            break
+
+        elif choice == "r":
+            attempt += 1
+            typer.secho(f"🔁 Regenerating... ({attempt}/{max_attempts})", fg=typer.colors.YELLOW)
         else:
-            typer.secho("❌ Commit failed.", fg=typer.colors.RED)
+            typer.secho("❌ Commit cancelled.", fg=typer.colors.RED)
+            break
+
+    else:
+        typer.secho("⚠️ Max regenerations reached. No commit made.", fg=typer.colors.RED)
+
 
 if __name__ == "__main__":
     cli_app()
