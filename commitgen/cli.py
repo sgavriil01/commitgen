@@ -58,13 +58,18 @@ def generate():
         typer.echo("⚠️ No staged changes found. Use `git add` first.")
         raise typer.Exit()
 
-    prompt_template = """Write a Git commit message for the following staged diff.
-Use the Conventional Commits format: <type>(<scope>): <description>
-Allowed types: feat, fix, chore, docs, refactor, style, test
+    prompt_template = """
+                        You are an assistant that writes high-quality Git commit messages following the Conventional Commits standard.
 
-Diff:
-{diff}
-"""
+                        Instructions:
+                        - Format: <type>(<scope>): <description>
+                        - Be concise (max 1 line), relevant, and avoid generic phrases like "update" or "fix".
+                        - Only output the commit message, nothing else.
+                        - Allowed types: feat, fix, chore, docs, refactor, style, test
+
+                        Here is the staged diff:
+                        {diff}
+                        """
 
     attempt = 0
     max_attempts = 3
