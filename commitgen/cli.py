@@ -103,3 +103,4 @@ def generate(mode: str = typer.Option("squash", help="Mode: 'squash' or 'split'"
 
 if __name__ == "__main__":
     cli_app()
+    print("Dbugging: CLI app initialized with Groq API key.")
