@@ -42,18 +42,13 @@ def get_git_diff() -> str:
         return result.stdout.decode("utf-8", errors="replace").strip()
 
 def extract_first_valid_commit_line(message: str) -> str:
-    """Return the first line that matches the Conventional Commits format."""
+    """Return the first valid Conventional Commit line, stripped of markdown."""
     pattern = re.compile(r"^(feat|fix|chore|docs|refactor|style|test)(\([\w\-]+\))?: .+")
     for line in message.strip().splitlines():
-        if pattern.match(line.strip()):
-            return line.strip()
-    return "chore: update"  # fallback
-
-def extract_first_line(message: str) -> str:
-    """Return the first non-empty line from a message."""
-    for line in message.strip().splitlines():
-        if line.strip() and not line.strip().startswith("```"):
-            return line.strip()
+        # Strip markdown (** **) and whitespace
+        clean = re.sub(r"^\*\*(.*?)\*\*$", r"\1", line.strip())
+        if pattern.match(clean):
+            return clean
     return "chore: update"  # fallback
 
 @cli_app.command()
