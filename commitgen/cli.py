@@ -1,115 +1,105 @@
 import subprocess
-import typer
 import os
+import re
+import typer
+from typing import List
 from dotenv import load_dotenv
 from openai import OpenAI
-import re
 
 cli_app = typer.Typer()
 
-# Load your .env file to get the API key
+# Load GROQ_API_KEY
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
+if not api_key:
+    raise RuntimeError("Missing GROQ_API_KEY in .env")
 
 client = OpenAI(
     api_key=api_key,
     base_url="https://api.groq.com/openai/v1",
 )
 
-def query_groq(prompt: str, model: str = "llama3-8b-8192") -> str:
-    """Send prompt to Groq and return the response."""
+# Prompt instructions with few-shot examples
+FEW_SHOT_PROMPT = """
+You are an expert software engineer writing Git commit messages in Conventional Commits format.
+Use this format: <type>(<scope>): <description>
+Do not include explanations. Only return a single commit message line.
+Allowed types: feat, fix, chore, docs, refactor, style, test
+
+Examples:
+Diff:
+diff --git a/utils/math.py b/utils/math.py
++def square(x):
++    return x * x
+
+Commit:
+feat(utils): add square function
+
+Diff:
+diff --git a/api/main.py b/api/main.py
+-import logging
++import logging
++logging.basicConfig(level=logging.DEBUG)
+
+Commit:
+chore(api): add debug logging setup
+"""
+
+def run_git_command(args: List[str]) -> str:
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return result.stdout.decode("utf-8", errors="replace").strip()
+
+def get_staged_files() -> List[str]:
+    output = run_git_command(["git", "diff", "--cached", "--name-only"])
+    return output.splitlines()
+
+def get_file_diff(filepath: str) -> str:
+    return run_git_command(["git", "diff", "--cached", "--unified=0", "--", filepath])
+
+def query_groq(diff: str) -> str:
+    full_prompt = f"{FEW_SHOT_PROMPT}\n\nDiff:\n{diff}\n\nCommit:"
     response = client.chat.completions.create(
-        model=model,
+        model="llama3-8b-8192",
         messages=[
-            {"role": "system", "content": "You are an AI assistant that writes short, clean Git commit messages in Conventional Commits format."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": "You're a clean Git commit message writer."},
+            {"role": "user", "content": full_prompt}
         ],
-        temperature=0.7,
-        max_tokens=150,
+        temperature=0.4,
+        max_tokens=100
     )
     return response.choices[0].message.content.strip()
 
-def get_git_diff() -> str:
-    """Return the staged git diff with fallback decoding."""
-    result = subprocess.run(
-        ["git", "diff", "--cached"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    try:
-        return result.stdout.decode("utf-8").strip()
-    except UnicodeDecodeError:
-        return result.stdout.decode("utf-8", errors="replace").strip()
-
-def extract_first_valid_commit_line(message: str) -> str:
-    """Return the first valid Conventional Commit line, stripped of markdown."""
-    pattern = re.compile(r"^(feat|fix|chore|docs|refactor|style|test)(\([\w\-]+\))?: .+")
-    for line in message.strip().splitlines():
-        clean = re.sub(r"^\*\*(.*?)\*\*$", r"\1", line.strip())  # remove **bold**
-        if pattern.match(clean):
-            return clean
-    return "chore: update"  # fallback
-
 @cli_app.command()
-def generate():
-    """Interactively generate and confirm a commit message from staged code."""
-    diff = get_git_diff()
-    if not diff:
-        typer.echo("⚠️ No staged changes found. Use `git add` first.")
+def generate(mode: str = typer.Option("squash", help="Mode: 'squash' or 'split'")):
+    """Generate Git commit messages using Groq based on staged changes."""
+    files = get_staged_files()
+    if not files:
+        typer.secho("⚠️ No staged changes found. Use `git add` first.", fg=typer.colors.YELLOW)
         raise typer.Exit()
 
-    prompt_template = """
-                        You are an assistant that writes high-quality Git commit messages following the Conventional Commits standard.
+    if mode == "split":
+        for file in files:
+            diff = get_file_diff(file)
+            typer.secho(f"\n📄 {file}", fg=typer.colors.CYAN)
+            commit_msg = query_groq(diff)
+            typer.echo(f"✅ Suggested: {commit_msg}")
+            choice = typer.prompt("Commit this? (y = yes, s = skip)", default="y").lower()
+            if choice == "y":
+                subprocess.run(["git", "commit", "-m", commit_msg, "--", file])
+                typer.secho("✅ Committed.\n", fg=typer.colors.GREEN)
+            else:
+                typer.secho("⏩ Skipped.\n", fg=typer.colors.YELLOW)
 
-                        Instructions:
-                        - Format: <type>(<scope>): <description>
-                        - Be concise (max 1 line), relevant, and avoid generic phrases like "update" or "fix".
-                        - Only output the commit message, nothing else.
-                        - Allowed types: feat, fix, chore, docs, refactor, style, test
-
-                        Here is the staged diff:
-                        {diff}
-                        """
-
-    attempt = 0
-    max_attempts = 3
-    message_clean = None
-
-    while attempt < max_attempts:
-        prompt = prompt_template.format(diff=diff)
-        typer.secho("🧠 Prompt sent to Groq...", fg=typer.colors.CYAN)
-        message_raw = query_groq(prompt)
-        message_clean = extract_first_valid_commit_line(message_raw)
-
-        typer.secho("\n✅ Suggested Commit Message:\n", fg=typer.colors.GREEN)
-        typer.echo(message_clean)
-
-        choice = typer.prompt(
-            "\n🤖 Do you want to commit with this message? (y = yes, r = regenerate, n = cancel)",
-            default="y"
-        ).lower()
-
-        if choice == "y":
-            try:
-                result = subprocess.run(["git", "commit", "-m", message_clean])
-                if result.returncode == 0:
-                    typer.secho("✅ Commit created successfully.", fg=typer.colors.GREEN)
-                else:
-                    typer.secho("❌ Commit failed.", fg=typer.colors.RED)
-            except Exception as e:
-                typer.secho(f"❌ Error: {e}", fg=typer.colors.RED)
-            break
-
-        elif choice == "r":
-            attempt += 1
-            typer.secho(f"🔁 Regenerating... ({attempt}/{max_attempts})", fg=typer.colors.YELLOW)
+    else:  # squash mode
+        full_diff = run_git_command(["git", "diff", "--cached", "--unified=0"])
+        commit_msg = query_groq(full_diff)
+        typer.echo(f"\n✅ Suggested Commit Message:\n{commit_msg}")
+        confirm = typer.prompt("Do you want to commit with this message? (y/n)", default="y").lower()
+        if confirm == "y":
+            subprocess.run(["git", "commit", "-m", commit_msg])
+            typer.secho("✅ Commit created.", fg=typer.colors.GREEN)
         else:
             typer.secho("❌ Commit cancelled.", fg=typer.colors.RED)
-            break
-
-    else:
-        typer.secho("⚠️ Max regenerations reached. No commit made.", fg=typer.colors.RED)
-
 
 if __name__ == "__main__":
     cli_app()
