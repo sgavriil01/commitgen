@@ -1,2 +1,2 @@
 [console_scripts]
-commitgen = commitgen.cli:app
+commitgen = commitgen.main:app

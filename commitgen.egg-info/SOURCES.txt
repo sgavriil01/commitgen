@@ -1,5 +1,6 @@
 pyproject.toml
 commitgen/cli.py
+commitgen/main.py
 commitgen.egg-info/PKG-INFO
 commitgen.egg-info/SOURCES.txt
 commitgen.egg-info/dependency_links.txt
