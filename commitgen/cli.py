@@ -91,10 +91,6 @@ def make_commit(title: str, body: str) -> None:
         f.flush()
         subprocess.run(["git", "commit", "-F", f.name])
         
-def add(x: int, y: int) -> int:
-    print("Debugging connection")
-    return x + y
-
 @cli_app.command()
 def generate():
     diff = get_full_staged_diff()
