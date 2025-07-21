@@ -1,0 +1,35 @@
+# ✅ Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ✅ Virtual environments
+.venv/
+env/
+venv/
+
+# ✅ MacOS & system files
+.DS_Store
+Thumbs.db
+
+# ✅ Editor files
+.vscode/
+.idea/
+
+# ✅ Git internals
+.git/COMMIT_EDITMSG
+
+# ✅ Typer autocomplete cache
+.typer_complete_*
+
+# ✅ Logs, temp, etc.
+*.log
+*.tmp
+*.swp
+
+# ✅ Build artifacts
+*.egg-info/
+dist/
+build/
