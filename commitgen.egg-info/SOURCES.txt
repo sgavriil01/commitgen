@@ -1,0 +1,8 @@
+pyproject.toml
+commitgen/cli.py
+commitgen.egg-info/PKG-INFO
+commitgen.egg-info/SOURCES.txt
+commitgen.egg-info/dependency_links.txt
+commitgen.egg-info/entry_points.txt
+commitgen.egg-info/requires.txt
+commitgen.egg-info/top_level.txt

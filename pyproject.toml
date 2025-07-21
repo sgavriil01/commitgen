@@ -1,0 +1,11 @@
+[project]
+name = "commitgen"
+version = "0.1.0"
+description = "AI-powered Git commit message generator"
+authors = [{ name = "Your Name", email = "your@email.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["typer[all]", "requests"]
+
+[project.scripts]
+commitgen = "commitgen.cli:app"

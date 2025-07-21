@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: commitgen
+Version: 0.1.0
+Summary: AI-powered Git commit message generator
+Author-email: Your Name <your@email.com>
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: typer[all]
+Requires-Dist: requests
