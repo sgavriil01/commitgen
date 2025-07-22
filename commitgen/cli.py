@@ -116,6 +116,11 @@ def is_low_value_commit(title: str) -> bool:
     """
     return any(p.search(title) for p in LOW_VALUE_PATTERNS)
 
+def add(x: int, y: int) -> int:
+    """
+    Simple addition function for demonstration purposes.
+    """
+    return x + y
 
 def query_commit_message(diff: str, model: str = "llama3-8b-8192") -> tuple[str, str]:
     """
